@@ -20,10 +20,10 @@ const quickDraw = {
       let stroke = data[i];
       for (var j = 1; j < stroke[0].length; j++) {
         let dots = quickDraw._plot(
-          stroke[0][j - 1] * size / 256,
-          stroke[1][j - 1] * size / 256,
-          stroke[0][j] * size / 256,
-          stroke[1][j] * size / 256
+          (stroke[0][j - 1] * size) / 256,
+          (stroke[1][j - 1] * size) / 256,
+          (stroke[0][j] * size) / 256,
+          (stroke[1][j] * size) / 256
         );
 
         for (var k = 0; k < dots.length; k++) {
@@ -46,49 +46,71 @@ const quickDraw = {
     return bitmap;
   },
 
+  _strokeToMultiArray: function (data) {
+    var output = [];
+    for (let i = 0; i < data.length; i++) {
+      var stroke = [];
+      var xd = data[i][0];
+      var yd = data[i][1];
+      for (let j = 0; j < xd.length; j++) {
+        x = xd[j];
+        y = yd[j];
+        stroke.push([x, y]);
+      }
+
+      output.push(stroke);
+    }
+    return output;
+  },
+
   /** Downloads the given amount of drawings from the given category */
   _downloadSet: function (category, amount) {
-    var url = 'https://storage.googleapis.com/quickdraw_dataset/full/simplified/';
+    var url =
+      'https://storage.googleapis.com/quickdraw_dataset/full/simplified/';
     url += encodeURIComponent(category) + '.ndjson';
 
     return new Promise((resolve, reject) => {
-      https.get(url, (res) => {
-        var { statusCode } = res;
+      https
+        .get(url, (res) => {
+          var { statusCode } = res;
 
-        if (statusCode !== 200) {
-          throw new Error(`Request Failed.\n Status Code: ${statusCode}`);
-        }
+          if (statusCode !== 200) {
+            throw new Error(`Request Failed.\n Status Code: ${statusCode}`);
+          }
 
-        res.setEncoding('utf8');
-        var drawings = [];
-        res
-          .pipe(ndjson.parse())
-          .on('data', function (obj) {
-            if (drawings.length < amount) {
-              drawings.push(obj);
-            } else {
-              this.destroy();
-            }
-          })
-          .on('end', () => {
-            resolve(drawings);
-          })
-          .on('close', () => {
-            resolve(drawings);
-          });
-      }).on('error', (e) => {
-        throw new Error(e.message);
-      });
+          res.setEncoding('utf8');
+          var drawings = [];
+          res
+            .pipe(ndjson.parse())
+            .on('data', function (obj) {
+              if (drawings.length < amount) {
+                drawings.push(obj);
+              } else {
+                this.destroy();
+              }
+            })
+            .on('end', () => {
+              resolve(drawings);
+            })
+            .on('close', () => {
+              resolve(drawings);
+            });
+        })
+        .on('error', (e) => {
+          throw new Error(e.message);
+        });
     });
   },
 
   _readSet: function (category) {
-    var gzip = fs.readFileSync(path.join(__dirname, `./drawings/${category}.ndjson.gz`));
+    var gzip = fs.readFileSync(
+      path.join(__dirname, `./drawings/${category}.ndjson.gz`)
+    );
     var unzipped = zlib.unzipSync(Buffer.from(gzip)).toString();
 
     var data = unzipped.split('\r\n');
     data.pop();
-    data = data.map(x => JSON.parse(x));
+    data = data.map((x) => JSON.parse(x));
 
     return data;
   },
@@ -106,27 +128,36 @@ const quickDraw = {
     var drawings = await quickDraw._downloadSet(category, amount);
 
     if (drawings.length < amount) {
-      console.warn(`Requested ${amount} images from '${category}', only ${drawings.length} available!`);
+      console.warn(
+        `Requested ${amount} images from '${category}', only ${drawings.length} available!`
+      );
     }
 
     var fileName = category + '.ndjson.gz';
     var transformStream = ndjson.serialize();
-    var outputStream = fs.createWriteStream(path.join(__dirname, '/drawings/', fileName));
+    var outputStream = fs.createWriteStream(
+      path.join(__dirname, '/drawings/', fileName)
+    );
 
     var gzip = zlib.createGzip();
 
     transformStream.pipe(gzip).pipe(outputStream);
 
     drawings.forEach(function (d) {
-      let array = quickDraw._strokeToArray(d.drawing, size);
-      transformStream.write(array);
+      //let array = quickDraw._strokeToArray(d.drawing, size);
+      d.drawing = quickDraw._strokeToMultiArray(d.drawing);
+      transformStream.write(d);
     });
 
     transformStream.end();
 
     return new Promise((resolve, reject) => {
-      outputStream.on('finish', function handleFinish () {
-        console.log(category, ' - Processing done! # of drawings:', drawings.length);
+      outputStream.on('finish', function handleFinish() {
+        console.log(
+          category,
+          ' - Processing done! # of drawings:',
+          drawings.length
+        );
         resolve();
       });
     });
@@ -140,12 +171,24 @@ const quickDraw = {
     }
   },
 
+  getDrawings: function (category) {
+    let data;
+    try {
+      data = quickDraw._readSet(category);
+      return data;
+    } catch (err) {
+      throw new Error(`Missing category: '${category}'. Please import!`);
+    }
+  },
+
   /** Returns a useable dataset for Neataptic and Synaptic */
   set: function (amount, categories = quickDraw.categories) {
     var dataSet = [];
 
     var chunkSize = Math.floor(amount / categories.length);
-    var rest = Math.round((amount / categories.length - chunkSize) * categories.length);
+    var rest = Math.round(
+      (amount / categories.length - chunkSize) * categories.length
+    );
 
     var inputSize;
 
@@ -162,7 +205,11 @@ const quickDraw = {
       if (i === 0) {
         inputSize = data[0].length;
       } else if (data[0].length !== inputSize) {
-        console.warn(`${category} set does not have correct dimensions and has not been included. Wanted dim: ${Math.sqrt(inputSize)}, ${category} dim: ${Math.sqrt(data[0].length)}`);
+        console.warn(
+          `${category} set does not have correct dimensions and has not been included. Wanted dim: ${Math.sqrt(
+            inputSize
+          )}, ${category} dim: ${Math.sqrt(data[0].length)}`
+        );
       }
 
       let toPick;
@@ -174,7 +221,9 @@ const quickDraw = {
       }
 
       if (data.length < toPick) {
-        throw new Error(`Too few elements in local '${category}' set! (${data.length}, ${toPick} needed)`);
+        throw new Error(
+          `Too few elements in local '${category}' set! (${data.length}, ${toPick} needed)`
+        );
       }
 
       let picked = quickDraw._pickRandom(data, toPick);
@@ -283,20 +332,36 @@ const quickDraw = {
 
     if (steep) {
       for (let x = xPx1 + 1; x <= xPx2 - 1; x++) {
-        dots.push({ x: Math.floor(Math.abs(intery)), y: x, b: 1 - fraction(intery) });
-        dots.push({ x: Math.floor(Math.abs(intery)) + 1, y: x, b: fraction(intery) });
+        dots.push({
+          x: Math.floor(Math.abs(intery)),
+          y: x,
+          b: 1 - fraction(intery),
+        });
+        dots.push({
+          x: Math.floor(Math.abs(intery)) + 1,
+          y: x,
+          b: fraction(intery),
+        });
         intery = intery + gradient;
       }
     } else {
       for (let x = xPx1 + 1; x <= xPx2 - 1; x++) {
-        dots.push({ x: x, y: Math.floor(Math.abs(intery)), b: 1 - fraction(intery) });
-        dots.push({ x: x, y: Math.floor(Math.abs(intery)) + 1, b: fraction(intery) });
+        dots.push({
+          x: x,
+          y: Math.floor(Math.abs(intery)),
+          b: 1 - fraction(intery),
+        });
+        dots.push({
+          x: x,
+          y: Math.floor(Math.abs(intery)) + 1,
+          b: fraction(intery),
+        });
         intery = intery + gradient;
       }
     }
 
     return dots;
-  }
+  },
 };
 
 module.exports = quickDraw;
